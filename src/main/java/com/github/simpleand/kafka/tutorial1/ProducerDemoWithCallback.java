@@ -1,18 +1,20 @@
-package com.githyb.simpleand.kafka.tutorial1;
+package com.github.simpleand.kafka.tutorial1;
 
 import java.util.Properties;
+import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class ProducerDemo {
-
-    static Logger logger = LoggerFactory.getLogger(ProducerDemo.class);
+public class ProducerDemoWithCallback {
 
     public static void main(String[] args) {
+
+        final Logger logger = LoggerFactory.getLogger(ProducerDemoWithCallback.class);
 
         final String bootstrapServers = "127.0.0.1:9092";
 
@@ -23,7 +25,21 @@ public class ProducerDemo {
 
         KafkaProducer<String, String> producer = new KafkaProducer<String, String>(properties);
         ProducerRecord<String, String> record = new ProducerRecord<String, String>("first_topic", "hello world!1");
-        producer.send(record);
+        producer.send(record, new Callback() {
+
+            public void onCompletion(final RecordMetadata recordMetadata, final Exception e) {
+                if(e == null){
+                   //record successfully
+                    logger.info("Received new metadata \n" +
+                            "Topic: " + recordMetadata.topic() + "\n" +
+                            "Partition: " + recordMetadata.partition() + "\n" +
+                            "Offset: " + recordMetadata.offset() + "\n" +
+                            "Timestamp: " + recordMetadata.timestamp());
+                }  else {
+                    e.printStackTrace();
+                }
+            }
+        });
 
         //só por garantia, mas o close já faz isso implicitamente
         producer.flush();
