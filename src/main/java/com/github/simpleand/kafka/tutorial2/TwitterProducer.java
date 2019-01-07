@@ -12,11 +12,16 @@ import com.twitter.hbc.httpclient.auth.OAuth1;
 import java.util.List;
 import java.util.concurrent.BlockingDeque;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 import com.google.common.collect.Lists;
 
 public class TwitterProducer {
+
+    final Logger logger = LoggerFactory.getLogger(TwitterProducer.class);
 
     private String consumerKey = "ZtQRylD37aBfPpyto28IxhcxL";
     private String consumerSecret = "jv5rUYUWur3rQ0hUUtNvhtPxlX3YyjHUUhAIZkk87N0zazNUSk";
@@ -27,20 +32,42 @@ public class TwitterProducer {
         new TwitterProducer().run();
     }
 
-    public void run(){
+    public void run() {
+
+        logger.info("Setup");
+
         BlockingDeque<String> msgQueue = new LinkedBlockingDeque<>(1000);
-         Client client = createTwitterClient(msgQueue);
-         client.connect();
+        Client client = createTwitterClient(msgQueue);
+        client.connect();
+
+        while (!client.isDone()) {
+
+            String msg = null;
+
+            try {
+                msg = msgQueue.poll(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+                client.stop();
+            }
+
+            if (msg != null) {
+                logger.info(msg);
+            }
+
+        }
+
+        logger.info("End of application");
     }
 
-    public Client createTwitterClient(BlockingDeque<String> msgQueue){
+    public Client createTwitterClient(BlockingDeque<String> msgQueue) {
         Hosts hoseBirdHosts = new HttpHosts(Constants.STREAM_HOST);
         StatusesFilterEndpoint hoseBirdEndpoint = new StatusesFilterEndpoint();
 
-        List<String> terms = Lists.newArrayList("kafka");
+        List<String> terms = Lists.newArrayList("bitcoin");
         hoseBirdEndpoint.trackTerms(terms);
 
-        Authentication hoseBirdAuth = new OAuth1(consumerKey,consumerSecret,token,secret);
+        Authentication hoseBirdAuth = new OAuth1(consumerKey, consumerSecret, token, secret);
 
         ClientBuilder builder = new ClientBuilder()
                 .name("Hosebird-Client-01")
