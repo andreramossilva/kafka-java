@@ -15,8 +15,9 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.elasticsearch.action.bulk.BulkRequest;
+import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
@@ -28,7 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import com.google.gson.JsonParser;
 
-public class ElasticSearchConsumer {
+public class ElasticSearchConsumerWithBulk {
 
     private static JsonParser jsonParser = new JsonParser();
 
@@ -67,7 +68,7 @@ public class ElasticSearchConsumer {
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");  //disable auto commit of offsets
-        properties.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "10");
+        properties.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "100");
 
         KafkaConsumer<String, String> consumer = new KafkaConsumer<String, String>(properties);
         consumer.subscribe(Arrays.asList(topic));
@@ -77,7 +78,7 @@ public class ElasticSearchConsumer {
 
     public static void main(String[] args) throws IOException {
 
-        Logger logger = LoggerFactory.getLogger(ElasticSearchConsumer.class.getName());
+        Logger logger = LoggerFactory.getLogger(ElasticSearchConsumerWithBulk.class.getName());
 
         RestHighLevelClient client = createClient();
 
@@ -87,7 +88,11 @@ public class ElasticSearchConsumer {
 
             final ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
 
-            logger.info("Received " + records.count() + " records");
+            final int recordCount = records.count();
+            logger.info("Received " + recordCount + " records");
+
+            BulkRequest bulkRequest = new BulkRequest();
+
             for(ConsumerRecord<String, String> record : records){
 
                 //there are two kinds to generate id on Kafka
@@ -95,32 +100,38 @@ public class ElasticSearchConsumer {
                 //String id = record.topic() + "_" + record.partition() + "_" + record.offset();
 
                 //Second is especific ID, most used
-                String id = extractIdFromTweet(record.value());
-
-                IndexRequest indexRequest = new IndexRequest(
-                        "twitter",
-                        "tweets",
-                        id) // to make consumer idempotent
-                        .source(record.value(), XContentType.JSON);
-
-                IndexResponse indexResponse = client.index(indexRequest, RequestOptions.DEFAULT);
-                logger.info(indexResponse.getId());
 
                 try {
-                    Thread.sleep(10);
+                    String id = extractIdFromTweet(record.value());
+
+                    IndexRequest indexRequest = new IndexRequest(
+                            "twitter",
+                            "tweets",
+                            id) // to make consumer idempotent
+                            .source(record.value(), XContentType.JSON);
+
+                    bulkRequest.add(indexRequest); // add to bulk request (takes no time)
+                } catch (NullPointerException e){
+                    logger.warn("skipping bad data: " + record.value());
+                }
+
+//                With bulkRequest, is not necessary use IndexResponse
+//                IndexResponse indexResponse = client.index(indexRequest, RequestOptions.DEFAULT);
+//                logger.info(indexResponse.getId());
+            }
+
+            if(recordCount > 0) {
+                BulkResponse bulkResponse = client.bulk(bulkRequest, RequestOptions.DEFAULT);
+
+                logger.info("Committing offsets...");
+                consumer.commitAsync();
+                logger.info("Offsets has been commited");
+
+                try {
+                    Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
-            }
-
-            logger.info("Committing offsets...");
-            consumer.commitAsync();
-            logger.info("Offsets has been commited");
-
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
             }
         }
 
